@@ -1,3 +1,11 @@
+# What is this?
+`fpr-remote-ts` allows you to call typescript functions from your browser as if they were executed on the node.js server.
+
+For example, you have a function `function get_user_by_id(id: number): User` that you want to run on a server that makes a SQL query on sqlite.
+This library allows you to generate server and client typescript files that allow you to call `get_user_by_id` from the browser with type safety and without copy-and-paste.
+
+See the `examples` for more detail.
+
 # Quickstart
 Let `foo` be your project directory.
 And we assume that you have already run `npm init` in your project `foo`
