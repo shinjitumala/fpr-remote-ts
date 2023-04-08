@@ -1,11 +1,11 @@
+// BEGIN CLIENT HEADER
 import * as http from "http"
 
-const host = "8000"
 const opts = {
     method: "POST",
     headers: { "Content-Type": "application/json" },
 }
-const parse_res_as = <T>(path: string, obj: Object) => {
+const parse_res_as = <T>(host: string, path: string, obj: Object) => {
     return new Promise<T>(p => {
         var buf: Buffer
         const req = http.request(
@@ -20,15 +20,24 @@ const parse_res_as = <T>(path: string, obj: Object) => {
         req.end()
     })
 }
+// END CLIENT HEADER
+// BEGIN DEFS
+const host = "http://127.0.0.1"
+const port = "8000"
+const domain = `${host}:${port}`
 
-class Cat {
+export class Cat {
 
 }
-
+// END DEFS
+// BEGIN API
 export const cat_get_by_id = async (id: number) => {
-    return parse_res_as<Cat>("cat_get_by_id", { id: id })
+    return parse_res_as<Cat>(domain, "cat_get_by_id", { id: id })
 }
-
 export const cat_search = async (id: number, name: string) => {
-    return parse_res_as<Cat[]>("cat_search", { id: id, name: name })
+    return parse_res_as<Cat[]>(domain, "cat_search", { id: id, name: name })
 }
+export const cat_get_by_name = async (name: string) => {
+    return parse_res_as<Cat>(domain, "cat_get_by_name", { name: name })
+}
+// END API

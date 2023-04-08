@@ -1,105 +1,124 @@
-import { createReadStream, createWriteStream } from "fs"
-import * as readline from "node:readline"
+import { WriteStream, createReadStream, createWriteStream } from "fs"
+import { createInterface } from "node:readline"
+import { Transform, TransformCallback } from "stream"
+import { pipeline } from "stream/promises"
 
-const argv = process.argv
-const print_usage = () => {
-    console.log(`Usage: ${argv[1]} <input> <output server> <output client>`)
-}
-if (argv.length != 5) {
-    print_usage()
-    process.exit(1)
-}
-const input_path = argv[2]
-const output_srver_path = argv[3]
-const output_client_path = argv[4]
+const append = async (src_file: string, os: WriteStream, value_map?: Record<string, string>) => {
+    const substitute = (input: string, value_map: Record<string, string>) => {
+        for (const [k, v] of Object.entries(value_map)) {
+            input = input.replaceAll(new RegExp(`\\$\\{${k}\\}`), v)
+        }
+        return input
+    }
 
-const line_begin_types = "// BEGIN TYPES"
-const line_end_types = "// END TYPES"
-const line_begin_api = "interface API {"
-const line_end_api = "} // END API"
+    return new Promise<void>(p => {
+        const is = createReadStream(src_file)
+        if (value_map === undefined) {
+            is.pipe(os, { end: false })
+            is.on("close", () => { p() })
+            return
+        }
 
-const host = "http://127.0.0.1"
-const port = 8000
-const url = `${host}:${port}`
-
-const lines = readline.createInterface({
-    input: createReadStream(input_path),
-    crlfDelay: Infinity,
-})
-const oss = createWriteStream(output_srver_path)
-const osc = createWriteStream(output_client_path)
-const header = `import * as http from "http"
-
-const host = "${port}"
-const opts = {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-}
-const parse_res_as = <T>(path: string, obj: Object) => {
-    return new Promise<T>(p => {
-        var buf: Buffer
-        const req = http.request(
-            \`\${host}/\${path}\`,
-            opts,
-            (res) => {
-                res.on("data", (d) => { buf += d })
-                res.on("end", () => { p(JSON.parse(buf.toString()) as T) })
+        const ts = new Transform({
+            transform(chunk: Buffer, encoding: BufferEncoding, callback: TransformCallback) {
+                this.push(substitute(chunk.toString(), value_map))
+                callback()
             }
-        )
-        req.write(JSON.stringify(obj))
-        req.end()
+        })
+
+        pipeline(is, ts)
+        ts.pipe(os, { end: false })
+        ts.on("close", () => { p() })
     })
 }
-`
 
-oss.write(header + "\n")
-
-var in_types = false
-var in_api = false
-lines.on("line", (l) => {
-    in_types = in_types && l !== line_end_types
-    in_api = in_api && l !== line_end_api
-
-    if (in_types) {
-        process_type_line(l)
+const main = async () => {
+    const args = {
+        input_def: "",
+        input_api: "",
+        output_server: "",
+        output_client: "",
     }
-    if (in_api) {
-        process_api_line(l)
+    const args_keys = Object.keys(args)
+    const argv = process.argv
+    const print_usage = () => {
+        const arglist = args_keys.map(k => "<" + k + ">").join(" ")
+        console.log(`Usage: ${argv[1]} ${arglist}`)
     }
-
-    in_types = in_types || l === line_begin_types
-    in_api = in_api || l === line_begin_api
-})
-
-const process_type_line = (l: string) => {
-    oss.write(l + "\n")
-    osc.write(l + "\n")
-}
-
-const process_api_line = (l: string) => {
-    const m = l.match(/([^:\s]+): \(([^)]*)\) => (.*)/)
-    if (m === null) {
-        throw Error()
+    if (argv.length != (args_keys.length + 2)) {
+        print_usage()
+        process.exit(1)
     }
-    const name = m[1]
-    const args = m[2]
-    const args_arr = args.split(", ").map(a => {
-        const m = a.match(/([^:]+): (.+)/)
-        if (m === null) {
-            throw Error()
-        }
-        return {
-            name: m[1],
-            type: m[2],
-        }
+    args_keys.forEach((v, i) => { args[v as keyof typeof args] = argv[i + 2] })
+
+    const oss = createWriteStream(args.output_server)
+    const osc = createWriteStream(args.output_client)
+
+    const pre_api_client = async () => {
+        await append(__dirname + "/../src/snip/client.ts", osc)
+        await append(args.input_def, osc)
+    }
+    const pre_api_server = async () => {
+        await append(args.input_def, oss)
+        await append(__dirname + "/../src/snip/server.ts", oss)
+    }
+    await Promise.all([pre_api_client(), pre_api_server()])
+
+    const lines = createInterface({
+        input: createReadStream(args.input_api),
+        crlfDelay: Infinity,
     })
-    const args_obj = "{ " + args_arr.map(a => a.name + ": " + a.name).join(", ") + " }"
-    const ret = m[3]
 
-    const client_func = `
-export const ${name} = async (${args}) => {
-    return parse_res_as<${ret}>("${name}", ${args_obj})
+    const process_api_file = async () => {
+        const parse_line = (l: string) => {
+            const m = l.match(/var ([^:\s]+): \(([^)]*)\) => (.*)/)
+            if (m === null) {
+                return
+            }
+            const name = m[1]
+            const args = m[2]
+            const args_arr = args.split(", ").map(a => {
+                const m = a.match(/([^:]+): (.+)/)
+                if (m === null) {
+                    throw Error()
+                }
+                return {
+                    name: m[1],
+                    type: m[2],
+                }
+            })
+            const args_obj = "{ " + args_arr.map(a => a.name + ": " + a.name).join(", ") + " }"
+            const args_access = args_arr.map(a => "body." + a.name).join(", ")
+
+            const ret = m[3]
+
+            const client_func = `export const ${name} = async (${args}) => {
+    return parse_res_as<${ret}>(domain, "${name}", ${args_obj})
+}`
+            osc.write(client_func + "\n")
+
+            oss.write(
+                `srv.post("/${name}", (req, res) => {
+    const body = req.body
+    const ret = api.${name}(${args_access})
+    res.json(JSON.stringify(ret))
+})` + "\n")
+        }
+
+        return new Promise<void>(p => {
+            lines.on("line", parse_line)
+            lines.on("close", () => p())
+        })
+    }
+
+    const begin_api_tag = "// BEGIN API\n"
+    const end_api_tag = "// END API\n"
+    osc.write(begin_api_tag)
+    oss.write(begin_api_tag)
+    await process_api_file()
+    osc.write(end_api_tag)
+    oss.write(end_api_tag)
+
+
 }
-`
-    oss.write(client_func)
-}
+main()

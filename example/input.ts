@@ -1,5 +1,5 @@
 // BEGIN TYPES
-class Cat {
+export class Cat {
 
 }
 // END TYPES
