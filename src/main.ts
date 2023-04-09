@@ -77,16 +77,21 @@ const main = async () => {
             }
             const name = m[1]
             const args = m[2]
-            const args_arr = args.split(", ").map(a => {
-                const m = a.match(/([^:]+): (.+)/)
-                if (m === null) {
-                    throw Error()
+            const args_arr = (() => {
+                if (args.length === 0) {
+                    return []
                 }
-                return {
-                    name: m[1],
-                    type: m[2],
-                }
-            })
+                return args.split(", ").map(a => {
+                    const m = a.match(/([^:]+): (.+)/)
+                    if (m === null) {
+                        throw Error(`Error in line: ${l}. Not a match: ${a}`)
+                    }
+                    return {
+                        name: m[1],
+                        type: m[2],
+                    }
+                })
+            })()
             const args_obj = "{ " + args_arr.map(a => a.name + ": " + a.name).join(", ") + " }"
             const args_access = args_arr.map(a => "body." + a.name).join(", ")
 
