@@ -25,16 +25,16 @@ srv.listen(port, () => {
 srv.post("/cat_get_by_id", (req, res) => {
     const body = req.body
     const ret = api.cat_get_by_id(body.id)
-    res.json(JSON.stringify(ret))
+    res.json(ret)
 })
 srv.post("/cat_search", (req, res) => {
     const body = req.body
     const ret = api.cat_search(body.id, body.name)
-    res.json(JSON.stringify(ret))
+    res.json(ret)
 })
 srv.post("/cat_get_by_name", (req, res) => {
     const body = req.body
     const ret = api.cat_get_by_name(body.name)
-    res.json(JSON.stringify(ret))
+    res.json(ret)
 })
 // END API

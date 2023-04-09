@@ -106,7 +106,7 @@ const main = async () => {
                 `srv.post("/${name}", (req, res) => {
     const body = req.body
     const ret = api.${name}(${args_access})
-    res.json(JSON.stringify(ret))
+    res.json(ret)
 })` + "\n")
         }
 
