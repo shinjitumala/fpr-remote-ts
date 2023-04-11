@@ -3,32 +3,57 @@ import { createInterface } from "node:readline"
 import { Transform, TransformCallback } from "stream"
 import { pipeline } from "stream/promises"
 
-const append = async (src_file: string, os: WriteStream, value_map?: Record<string, string>) => {
-    const substitute = (input: string, value_map: Record<string, string>) => {
-        for (const [k, v] of Object.entries(value_map)) {
-            input = input.replaceAll(new RegExp(`\\$\\{${k}\\}`), v)
-        }
-        return input
-    }
+const nl = '\n'
 
-    return new Promise<void>(p => {
-        const is = createReadStream(src_file)
-        if (value_map === undefined) {
-            is.pipe(os, { end: false })
-            is.on("close", () => { p() })
+class SnippetTransform extends Transform {
+    private readonly begin = "// BEGIN"
+
+    private has_begun = false
+    private value_map?: Record<string, string>
+
+    constructor(value_map?: Record<string, string>) {
+        super()
+        this.value_map = value_map
+    }
+    _transform(chunk: Buffer, encoding: BufferEncoding, callback: TransformCallback) {
+        const substitute = (input: string, value_map?: Record<string, string>) => {
+            if (!value_map) {
+                return input
+            }
+
+            for (const [k, v] of Object.entries(value_map)) {
+                input = input.replace(new RegExp(`__${k}__`, "g"), v)
+            }
+            return input
+        }
+
+        const str = chunk.toString()
+        if (this.has_begun) {
+            this.push(substitute(str, this.value_map))
+            callback()
             return
         }
-
-        const ts = new Transform({
-            transform(chunk: Buffer, encoding: BufferEncoding, callback: TransformCallback) {
-                this.push(substitute(chunk.toString(), value_map))
-                callback()
+        const lines = str.split(nl)
+        lines.forEach(l => {
+            if (this.has_begun) {
+                this.push(substitute(l, this.value_map) + nl)
+            }
+            if (l === this.begin) {
+                this.has_begun = true
             }
         })
+        callback()
+        return
+    }
+}
 
+const append = async (src_file: string, os: WriteStream, value_map?: Record<string, string>) => {
+    return new Promise<void>(p => {
+        const is = createReadStream(src_file)
+        const ts = new SnippetTransform(value_map)
         pipeline(is, ts)
         ts.pipe(os, { end: false })
-        ts.on("close", () => { p() })
+        ts.on("finish", p)
     })
 }
 
@@ -54,15 +79,10 @@ const main = async () => {
     const oss = createWriteStream(args.output_server)
     const osc = createWriteStream(args.output_client)
 
-    const pre_api_client = async () => {
-        await append(__dirname + "/../src/snip/client.ts", osc)
-        await append(args.input_def, osc)
-    }
-    const pre_api_server = async () => {
-        await append(args.input_def, oss)
-        await append(__dirname + "/../src/snip/server.ts", oss)
-    }
-    await Promise.all([pre_api_client(), pre_api_server()])
+    await append(args.input_def, osc)
+    await append(__dirname + "/../src/snip/client.ts", osc)
+    await append(args.input_def, oss)
+    await append(__dirname + "/../src/snip/server.ts", oss)
 
     const lines = createInterface({
         input: createReadStream(args.input_api),
@@ -70,7 +90,7 @@ const main = async () => {
     })
 
     const process_api_file = async () => {
-        const parse_line = (l: string) => {
+        const parse_line = async (l: string) => {
             const m = l.match(/var ([^:\s]+): \(([^)]*)\) => (.*)/)
             if (m === null) {
                 return
@@ -97,17 +117,17 @@ const main = async () => {
 
             const ret = m[3]
 
-            const client_func = `export const ${name} = async (${args}) => {
-    return parse_res_as<${ret}>(domain, "${name}", ${args_obj})
-}`
-            osc.write(client_func + "\n")
+            await append(__dirname + "/../src/snip/client_method.ts", osc, {
+                args: args,
+                ret: ret,
+                name: name,
+                args_obj: args_obj
+            })
+            await append(__dirname + "/../src/snip/server_method.ts", oss, {
+                name: name,
+                args_access: args_access,
+            })
 
-            oss.write(
-                `srv.post("/${name}", (req, res) => {
-    const body = req.body
-    const ret = api.${name}(${args_access})
-    res.json(ret)
-})` + "\n")
         }
 
         return new Promise<void>(p => {
@@ -123,7 +143,5 @@ const main = async () => {
     await process_api_file()
     osc.write(end_api_tag)
     oss.write(end_api_tag)
-
-
 }
 main()

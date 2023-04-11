@@ -1,9 +1,5 @@
+// BEGIN
 // BEGIN CLIENT HEADER
-
-const opts = {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-}
 const parse_res_as = async <T>(domain: string, path: string, obj: Object) => {
     return new Promise<T>(p => {
         fetch(`${domain}/${path}`, {

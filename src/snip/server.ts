@@ -1,6 +1,13 @@
+const root_rel = "null"
+const port = 0
+const domain = "null"
+// BEGIN
 // BEGIN SERVER HEADER
 import * as api from "./api_impl"
+import { createWriteStream } from "fs"
 import exp from "express"
+
+const log = createWriteStream(__dirname + "/fpr-budget.log")
 
 const root = __dirname + "/" + root_rel
 const srv = exp()
